@@ -6,12 +6,12 @@ Banco de dados gerenciado da plataforma **GearUp** (Tech Challenge FIAP — Fase
 
 - Instância RDS PostgreSQL em subnets privadas, criptografada, com TLS obrigatório e backup automático.
 - Parameter group ajustado para consistência e diagnóstico de performance.
-- Senha master gerada pelo Terraform e publicada, junto com os dados de conexão, no **SSM Parameter Store** — fonte única para a API (pipeline do GearUp) e para a Lambda de autenticação.
+- Senha master gerada pelo Terraform e publicada, junto com os dados de conexão, no **SSM Parameter Store** — fonte única para a API (pipeline do gearup-api) e para a Lambda de autenticação.
 
-A **instância** é responsabilidade deste repositório; o **schema** (tabelas, índices, constraints) evolui com o código, via migrations do EF Core no repositório [GearUp](https://github.com/SOAT-GearUp/GearUp). Justificativa da escolha do banco e modelagem completa (diagrama ER, relacionamentos, índices e constraints):
+A **instância** é responsabilidade deste repositório; o **schema** (tabelas, índices, constraints) evolui com o código, via migrations do EF Core no repositório [gearup-api](https://github.com/SOAT-GearUp/gearup-api). Justificativa da escolha do banco e modelagem completa (diagrama ER, relacionamentos, índices e constraints):
 
-- [RFC-002 — Banco de dados gerenciado](https://github.com/SOAT-GearUp/GearUp/blob/master/docs/fase-3/RFC/RFC-002%20-%20Banco%20de%20dados%20gerenciado.md)
-- [Modelagem e Justificativa](https://github.com/SOAT-GearUp/GearUp/blob/master/docs/fase-3/Banco%20de%20Dados/Modelagem%20e%20Justificativa.md)
+- [RFC-002 — Banco de dados gerenciado](https://github.com/SOAT-GearUp/gearup-api/blob/master/docs/fase-3/RFC/RFC-002%20-%20Banco%20de%20dados%20gerenciado.md)
+- [Modelagem e Justificativa](https://github.com/SOAT-GearUp/gearup-api/blob/master/docs/fase-3/Banco%20de%20Dados/Modelagem%20e%20Justificativa.md)
 
 ## Arquitetura
 
@@ -71,7 +71,7 @@ Workflow [`terraform.yml`](.github/workflows/terraform.yml):
 | push `main` (só via PR) | `apply` | production |
 | Run workflow → `apply` / `destroy` | manual | production |
 
-A instância é compartilhada pelos ambientes (um database por ambiente), por isso `homolog` valida e só `main` aplica ([RFC-001](https://github.com/SOAT-GearUp/GearUp/blob/master/docs/fase-3/RFC/RFC-001%20-%20Nuvem%20e%20estrategia%20de%20ambientes.md)).
+A instância é compartilhada pelos ambientes (um database por ambiente), por isso `homolog` valida e só `main` aplica ([RFC-001](https://github.com/SOAT-GearUp/gearup-api/blob/master/docs/fase-3/RFC/RFC-001%20-%20Nuvem%20e%20estrategia%20de%20ambientes.md)).
 
 **Secrets:** `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` (Learner Lab → AWS Details; expiram a cada sessão).
 
@@ -107,11 +107,11 @@ kubectl run psql --rm -it --restart=Never --image=postgres:17-alpine --env="PGPA
 | `/gearup/banco/usuario` | String | usuário master |
 | `/gearup/banco/senha` | SecureString | senha gerada (32 caracteres) |
 
-Consumidores: pipeline `CD` do GearUp (monta o Secret do Kubernetes) e Terraform do gearup-lambda-auth (variáveis da Lambda).
+Consumidores: pipeline `CD` do gearup-api (monta o Secret do Kubernetes) e Terraform do gearup-lambda-auth (variáveis da Lambda).
 
 ## Destroy
 
-Antes do `gearup-infra-k8s` e depois do GearUp e do gearup-lambda-auth:
+Antes do `gearup-infra-k8s` e depois do gearup-api e do gearup-lambda-auth:
 
 ```powershell
 terraform -chdir=terraform destroy
@@ -123,4 +123,4 @@ db.t3.micro single-AZ ~US$ 0,018/h + 20 GB gp3 ~US$ 0,08/dia. **O RDS cobra com 
 
 ## Swagger / Postman
 
-Este repositório não expõe APIs. Ver [GearUp](https://github.com/SOAT-GearUp/GearUp#apis-swagger-e-postman).
+Este repositório não expõe APIs. Ver [gearup-api](https://github.com/SOAT-GearUp/gearup-api#apis-swagger-e-postman).
