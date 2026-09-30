@@ -1,0 +1,22 @@
+# Terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# Variáveis com segredos (usar *.tfvars.example como modelo)
+*.tfvars
+!*.tfvars.example
+
+# Credenciais locais do Learner Lab
+.env
+.env.*
+!.env.example

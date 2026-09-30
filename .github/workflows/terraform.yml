@@ -1,0 +1,101 @@
+# ---------------------------------------------------------------------------
+# CI/CD do banco de dados gerenciado (RDS PostgreSQL)
+#
+#   Pull Request ............ fmt + validate + plan
+#   push em homolog ......... fmt + validate + plan  -> ambiente "homolog"
+#   push em main ............ apply                   -> ambiente "production"
+#   workflow_dispatch ....... plan | apply | destroy manual
+#
+# A instância é compartilhada pelos dois ambientes (um database por ambiente),
+# por isso homolog valida o plano e só main aplica. Ver RFC-002 no GearUp.
+#
+# Pré-requisito: a VPC do gearup-infra-k8s já provisionada.
+# Secrets: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN.
+# ---------------------------------------------------------------------------
+name: Terraform (RDS)
+
+on:
+  pull_request:
+    branches: [main, homolog]
+  push:
+    branches: [main, homolog]
+  workflow_dispatch:
+    inputs:
+      acao:
+        description: "Ação do Terraform"
+        type: choice
+        options: [plan, apply, destroy]
+        default: plan
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terraform-infra-db
+  cancel-in-progress: false
+
+env:
+  TF_IN_AUTOMATION: "true"
+  TF_VERSION: "1.15.8"
+  AWS_REGION: us-east-1
+
+jobs:
+  validar:
+    name: Formatação e validação
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+      - run: terraform fmt -check -recursive
+      - run: |
+          terraform -chdir=terraform init -backend=false -input=false
+          terraform -chdir=terraform validate
+
+  terraform:
+    name: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') && 'Apply (produção)' || format('{0} ({1})', inputs.acao || 'plan', github.ref_name) }}
+    needs: validar
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    environment: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || inputs.acao == 'apply' || inputs.acao == 'destroy') && 'production' || 'homolog' }}
+    env:
+      ACAO: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') && 'apply' || inputs.acao || 'plan' }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - name: Verificar credenciais do Learner Lab
+        env:
+          CHAVE: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        run: |
+          if [ -z "$CHAVE" ]; then
+            echo "::error::Configure AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY e AWS_SESSION_TOKEN (Learner Lab -> AWS Details -> AWS CLI)."
+            exit 1
+          fi
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: terraform init
+        run: bash scripts/tf-init.sh terraform
+      - name: terraform ${{ env.ACAO }}
+        run: |
+          case "$ACAO" in
+            plan)    terraform -chdir=terraform plan -input=false -no-color | tee plan.txt ;;
+            apply)   terraform -chdir=terraform apply -input=false -auto-approve ;;
+            destroy) terraform -chdir=terraform destroy -input=false -auto-approve ;;
+          esac
+      - name: Resumo
+        if: env.ACAO != 'destroy'
+        run: |
+          {
+            echo "### Banco de dados (${ACAO})"
+            echo '```'
+            if [ "$ACAO" = "plan" ]; then grep -E '^(Plan:|No changes)' plan.txt || true; else terraform -chdir=terraform output; fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
