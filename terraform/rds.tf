@@ -4,7 +4,7 @@
 # Uma instância atende os dois ambientes, com um database por ambiente
 # (gearup_homolog e gearup_production), criados pelas migrations do EF Core
 # na primeira subida da API. Isolamento lógico em vez de físico: uma segunda
-# instância dobraria o custo (ver RFC-002 no repositório GearUp).
+# instância dobraria o custo (ver RFC-002 no repositório gearup-api).
 #
 # CUSTO: db.t3.micro single-AZ ~ US$ 0,018/h + 20 GB gp3 ~ US$ 0,08/dia.
 # ATENÇÃO: o RDS continua cobrando com a sessão do lab encerrada. Rode o

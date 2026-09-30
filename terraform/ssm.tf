@@ -2,7 +2,7 @@
 # Credenciais publicadas no SSM Parameter Store
 #
 # Fonte única dos dados de conexão para quem consome o banco:
-#   - pipeline do GearUp (monta o Secret do Kubernetes da API);
+#   - pipeline do gearup-api (monta o Secret do Kubernetes da API);
 #   - Terraform do gearup-lambda-auth (injeta nas variáveis da Lambda).
 #
 # Assim a senha nunca passa por GitHub Secrets nem por arquivos versionados,

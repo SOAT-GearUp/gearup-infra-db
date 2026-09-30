@@ -7,7 +7,7 @@
 #   workflow_dispatch ....... plan | apply | destroy manual
 #
 # A instância é compartilhada pelos dois ambientes (um database por ambiente),
-# por isso homolog valida o plano e só main aplica. Ver RFC-002 no GearUp.
+# por isso homolog valida o plano e só main aplica. Ver RFC-002 no gearup-api.
 #
 # Pré-requisito: a VPC do gearup-infra-k8s já provisionada.
 # Secrets: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN.
