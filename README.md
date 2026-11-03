@@ -4,9 +4,9 @@ Banco de dados gerenciado da plataforma **GearUp** (Tech Challenge FIAP — Fase
 
 ## Propósito
 
-- Instância RDS PostgreSQL em subnets privadas, criptografada, com TLS obrigatório e backup automático.
+- **Uma instância RDS PostgreSQL por ambiente** (`gearup-postgres-homolog` com dados fictícios, `gearup-postgres` com os dados de produção), em subnets privadas, criptografadas, com TLS obrigatório e backup automático.
 - Parameter group ajustado para consistência e diagnóstico de performance.
-- Senha master gerada pelo Terraform e publicada, junto com os dados de conexão, no **SSM Parameter Store** — fonte única para a API (pipeline do gearup-api) e para a Lambda de autenticação.
+- Senha master gerada pelo Terraform para cada instância e publicada, junto com os dados de conexão, no **SSM Parameter Store** em `/gearup/<ambiente>/banco/*` — fonte única para a API (pipeline do gearup-api) e para a Lambda de autenticação de cada ambiente.
 
 A **instância** é responsabilidade deste repositório; o **schema** (tabelas, índices, constraints) evolui com o código, via migrations do EF Core no repositório [gearup-api](https://github.com/SOAT-GearUp/gearup-api). Justificativa da escolha do banco e modelagem completa (diagrama ER, relacionamentos, índices e constraints):
 
@@ -22,18 +22,23 @@ flowchart LR
             PODS[Pods gearup-api<br/>EKS]
         end
         subgraph PRIV["subnets privadas — Camada=privada, sem rota p/ internet"]
-            RDS[(RDS PostgreSQL 17<br/>db.t3.micro · 20 GB gp3 · criptografado<br/>gearup_production · gearup_homolog)]
-            LBD[Lambda gearup-auth-cpf]
+            RDSH[(gearup-postgres-homolog<br/>db.t3.micro · 20 GB gp3<br/>gearup_homolog)]
+            RDSP[(gearup-postgres<br/>db.t3.micro · 20 GB gp3<br/>gearup_production)]
+            LBD[Lambda gearup-auth-cpf-&lt;amb&gt;]
         end
         SG{{SG gearup-rds-sg<br/>5432 somente do CIDR da VPC}}
     end
     PG[[Parameter group<br/>force_ssl · slow query 500ms<br/>idle tx timeout · pg_stat_statements]]
-    SSM[(SSM /gearup/banco/<br/>host · porta · usuario · senha🔒)]
+    SSM[(SSM /gearup/&lt;amb&gt;/banco/<br/>host · porta · usuario · senha🔒)]
 
-    PODS -- TLS --> SG --> RDS
+    PODS -- TLS --> SG
     LBD -- TLS --> SG
-    PG -.-> RDS
-    RDS -. endpoint + senha gerada .-> SSM
+    SG --> RDSH
+    SG --> RDSP
+    PG -.-> RDSH
+    PG -.-> RDSP
+    RDSH -. endpoint + senha .-> SSM
+    RDSP -. endpoint + senha .-> SSM
 ```
 
 ```mermaid
@@ -71,7 +76,7 @@ Workflow [`terraform.yml`](.github/workflows/terraform.yml):
 | push `main` (só via PR) | `apply` | production |
 | Run workflow → `apply` / `destroy` | manual | production |
 
-A instância é compartilhada pelos ambientes (um database por ambiente), por isso `homolog` valida e só `main` aplica ([RFC-001](https://github.com/SOAT-GearUp/gearup-api/blob/master/docs/fase-3/RFC/RFC-001%20-%20Nuvem%20e%20estrategia%20de%20ambientes.md)).
+Este repositório provisiona as instâncias **dos dois ambientes**: `homolog` valida com `plan` e só `main` aplica, para que nenhuma mudança de infraestrutura chegue à conta sem passar por PR ([RFC-002](https://github.com/SOAT-GearUp/gearup-api/blob/master/docs/fase-3/RFC/RFC-002%20-%20Banco%20de%20dados%20gerenciado.md)).
 
 **Secrets:** `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` (Learner Lab → AWS Details; expiram a cada sessão).
 
@@ -85,7 +90,8 @@ terraform -chdir=terraform plan
 terraform -chdir=terraform apply        # ~8 min
 
 # Conferir o que foi publicado para os consumidores
-aws ssm get-parameters-by-path --path /gearup/banco --query "Parameters[].Name"
+aws ssm get-parameters-by-path --path /gearup/homolog/banco --query "Parameters[].Name"
+aws ssm get-parameters-by-path --path /gearup/production/banco --query "Parameters[].Name"
 ```
 
 Bash: `bash scripts/tf-init.sh terraform`.
@@ -93,8 +99,8 @@ Bash: `bash scripts/tf-init.sh terraform`.
 O banco **não é acessível de fora da VPC**. Para inspecionar dados, use um pod temporário no cluster:
 
 ```powershell
-$senha = aws ssm get-parameter --name /gearup/banco/senha --with-decryption --query Parameter.Value --output text
-$hostDb = aws ssm get-parameter --name /gearup/banco/host --query Parameter.Value --output text
+$senha = aws ssm get-parameter --name /gearup/homolog/banco/senha --with-decryption --query Parameter.Value --output text
+$hostDb = aws ssm get-parameter --name /gearup/homolog/banco/host --query Parameter.Value --output text
 kubectl run psql --rm -it --restart=Never --image=postgres:17-alpine --env="PGPASSWORD=$senha" -- psql "host=$hostDb dbname=gearup_homolog user=gearup sslmode=require"
 ```
 
@@ -102,12 +108,16 @@ kubectl run psql --rm -it --restart=Never --image=postgres:17-alpine --env="PGPA
 
 | Parâmetro | Tipo | Conteúdo |
 |---|---|---|
-| `/gearup/banco/host` | String | endpoint do RDS |
-| `/gearup/banco/porta` | String | 5432 |
-| `/gearup/banco/usuario` | String | usuário master |
-| `/gearup/banco/senha` | SecureString | senha gerada (32 caracteres) |
+Um conjunto por ambiente (`<amb>` = `homolog` ou `production`):
 
-Consumidores: pipeline `CD` do gearup-api (monta o Secret do Kubernetes) e Terraform do gearup-lambda-auth (variáveis da Lambda).
+| Parâmetro | Tipo | Conteúdo |
+|---|---|---|
+| `/gearup/<amb>/banco/host` | String | endpoint do RDS do ambiente |
+| `/gearup/<amb>/banco/porta` | String | 5432 |
+| `/gearup/<amb>/banco/usuario` | String | usuário master |
+| `/gearup/<amb>/banco/senha` | SecureString | senha gerada (32 caracteres) |
+
+Consumidores: pipeline `CD` do gearup-api (monta o Secret do Kubernetes) e Terraform do gearup-lambda-auth (variáveis da Lambda). Cada ambiente lê só os próprios parâmetros.
 
 ## Destroy
 
@@ -119,7 +129,7 @@ terraform -chdir=terraform destroy
 
 ## Custos
 
-db.t3.micro single-AZ ~US$ 0,018/h + 20 GB gp3 ~US$ 0,08/dia. **O RDS cobra com o lab parado** — destrua ao fim da sessão.
+Por instância: db.t3.micro single-AZ ~US$ 0,018/h + 20 GB gp3 ~US$ 0,08/dia. Duas instâncias: ~US$ 0,04/h. **O RDS cobra com o lab parado** — destrua ao fim da sessão.
 
 ## Swagger / Postman
 

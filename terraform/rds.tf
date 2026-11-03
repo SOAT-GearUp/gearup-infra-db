@@ -1,17 +1,20 @@
 # ---------------------------------------------------------------------------
 # PostgreSQL gerenciado (Amazon RDS)
 #
-# Uma instância atende os dois ambientes, com um database por ambiente
-# (gearup_homolog e gearup_production), criados pelas migrations do EF Core
-# na primeira subida da API. Isolamento lógico em vez de físico: uma segunda
-# instância dobraria o custo (ver RFC-002 no repositório gearup-api).
+# Uma instância por ambiente (var.ambientes): homologação usa dados
+# fictícios e produção os dados reais, sem compartilhar servidor. O schema de
+# cada uma é criado pelas migrations do EF Core na primeira subida da API.
+# Rede, security group e parameter group são compartilhados (não têm custo).
 #
-# CUSTO: db.t3.micro single-AZ ~ US$ 0,018/h + 20 GB gp3 ~ US$ 0,08/dia.
+# CUSTO por instância: db.t3.micro single-AZ ~ US$ 0,018/h + 20 GB gp3
+# ~ US$ 0,08/dia. Duas instâncias ~ US$ 0,04/h (ver RFC-002 no gearup-api).
 # ATENÇÃO: o RDS continua cobrando com a sessão do lab encerrada. Rode o
 # workflow de destroy ao fim de cada sessão.
 # ---------------------------------------------------------------------------
 
 resource "random_password" "master" {
+  for_each = var.ambientes
+
   length  = 32
   special = true
   # Sem caracteres que quebram connection strings (; = ' " @ / \ :).
@@ -89,7 +92,11 @@ resource "aws_db_parameter_group" "postgres" {
 }
 
 resource "aws_db_instance" "postgres" {
-  identifier = "${var.nome_projeto}-postgres"
+  for_each = var.ambientes
+
+  # Produção mantém o identificador original (instância criada antes da
+  # separação por ambiente); as demais recebem o sufixo do ambiente.
+  identifier = each.key == "production" ? "${var.nome_projeto}-postgres" : "${var.nome_projeto}-postgres-${each.key}"
 
   engine                      = "postgres"
   engine_version              = var.versao_postgres
@@ -102,11 +109,9 @@ resource "aws_db_instance" "postgres" {
   storage_encrypted = true
   # `max_allocated_storage` omitido: autoscaling de storage é custo surpresa.
 
-  # Database inicial usado pela produção. O de homologação é criado pela
-  # migration da API (o usuário master tem CREATEDB).
-  db_name  = "gearup_production"
+  db_name  = "gearup_${each.key}"
   username = var.usuario_master
-  password = random_password.master.result
+  password = random_password.master[each.key].result
   port     = 5432
 
   db_subnet_group_name   = aws_db_subnet_group.postgres.name
@@ -129,6 +134,19 @@ resource "aws_db_instance" "postgres" {
   apply_immediately            = true
 
   tags = {
-    Name = "${var.nome_projeto}-postgres"
+    Name     = each.key == "production" ? "${var.nome_projeto}-postgres" : "${var.nome_projeto}-postgres-${each.key}"
+    Ambiente = each.key
   }
+}
+
+# A instância e a senha de produção já existiam antes do for_each: os blocos
+# moved evitam que o Terraform as destrua e recrie.
+moved {
+  from = aws_db_instance.postgres
+  to   = aws_db_instance.postgres["production"]
+}
+
+moved {
+  from = random_password.master
+  to   = random_password.master["production"]
 }
