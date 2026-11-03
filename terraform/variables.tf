@@ -19,6 +19,17 @@ variable "tags_padrao" {
   }
 }
 
+variable "ambientes" {
+  description = "Ambientes da aplicação. Cada um recebe a sua própria instância RDS (homologação com dados fictícios, produção com dados reais)."
+  type        = set(string)
+  default     = ["homolog", "production"]
+
+  validation {
+    condition     = contains(var.ambientes, "production")
+    error_message = "O ambiente production é obrigatório."
+  }
+}
+
 variable "versao_postgres" {
   description = "Versão major do PostgreSQL (a AWS aplica o minor mais recente). Também define a família do parameter group."
   type        = string
